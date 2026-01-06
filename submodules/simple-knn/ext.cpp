@@ -11,7 +11,8 @@
 
 #include <torch/extension.h>
 #include "spatial.h"
-
+#include "simple_knn.h"
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("distCUDA2", &distCUDA2);
+m.def("knn", &SimpleKNN::knn, "Compute k-nearest neighbors");
+    m.def("distCUDA2", &distCUDA2, "Compute distance");
 }

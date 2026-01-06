@@ -16,6 +16,7 @@ import torch
 import torchvision
 from torch import nn
 
+# CLIP + SAM 을 결합하여 각 영상의 세그먼트 단위 특징 벡터(feature embedding) 를 생성해 저장
 
 # try:
 #     import open_clip
