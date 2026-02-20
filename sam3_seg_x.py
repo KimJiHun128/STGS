@@ -1,15 +1,22 @@
 import os
+import sys
 from typing import List, Dict, Any, Optional, Tuple
 from matplotlib.patches import Circle
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from PIL import Image
+import cv2
+import re
+sam3_root = "/home/jihun/PycharmProjects/SurgTPGS/submodules/sam3"
+if sam3_root not in sys.path:
+    sys.path.insert(0, sam3_root)
+import inspect
 import sam3
 from sam3 import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
+from sam3.model_builder import build_sam3_video_model
 
-import cv2
 
 # ======================
 # 도우미 함수들
@@ -627,7 +634,7 @@ if __name__ == "__main__":
 
     # SAM3 모델 로드
     sam3_root = os.path.join(os.path.dirname(sam3.__file__), "..")
-    bpe_path = f"{sam3_root}/assets/bpe_simple_vocab_16e6.txt.gz"
+    bpe_path = f"{sam3_root}/sam3/assets/bpe_simple_vocab_16e6.txt.gz"
 
     model = build_sam3_image_model(
         bpe_path=bpe_path,
@@ -636,8 +643,30 @@ if __name__ == "__main__":
     processor = Sam3Processor(model)
 
     # 이미지 경로
-    image_path = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/images/frame_000080_endo.png" # <--------------------------------------------
-    fov_mask_path = image_path.replace("/images/", "/masks/")
+    image_dir = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/images" # <--------------------------------------------
+    # 폴더 내 이미지 파일 리스트(확장자 필터)
+    img_exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+    files = [f for f in os.listdir(image_dir) if f.lower().endswith(img_exts)]
+    if len(files) == 0:
+        raise FileNotFoundError(f"No image files found in: {image_dir}")
+
+
+    # 파일명에서 숫자(프레임 번호) 기준 정렬: frame_000080, frame80, img_12 등 대응
+    def extract_first_int(name: str) -> int:
+        nums = re.findall(r"\d+", name)
+        return int(nums[0]) if nums else 10 ** 18  # 숫자 없으면 맨 뒤로
+
+
+    files_sorted = sorted(files, key=extract_first_int)
+    # files_sorted = sorted(files, key=extract_first_int, reverse=True) # reverse
+
+    first_image_name = files_sorted[0]
+    image_path = os.path.join(image_dir, first_image_name)
+
+    print(f"[Folder] {image_dir}")
+    print(f"[First Image] {first_image_name}")
+    print(f"[First Image Path] {image_path}")
+
     image = Image.open(image_path).convert("RGB")
     img_np = np.array(image)
 
@@ -654,6 +683,15 @@ if __name__ == "__main__":
 
     anns_all, anns_nms, grid_points  = gen.generate(img_np)
     print("before FOV: ", len(anns_nms))
+    # FOV 마스크 경로 만들기: images -> masks, 확장자는 무조건 .png로
+    # images/00000.jpg -> masks/00000.png (인덱스 기반)
+    mask_dir = image_dir.replace("/images", "/masks")  # .../video01_00080/masks
+    # frame_idx = 0  # 지금은 first frame을 쓰니 0
+    frame_idx = int(os.path.splitext(first_image_name)[0])
+
+    fov_mask_path = os.path.join(mask_dir, f"{frame_idx:05d}.png")
+    print("[FOV Mask Path]", fov_mask_path)
+
     anns_all_fov = apply_visible_fov_mask(anns_all, fov_mask_path, img_np.shape)
     anns_nms_fov = apply_visible_fov_mask(anns_nms, fov_mask_path, img_np.shape)
     print("after  FOV: ", len(anns_nms_fov))
@@ -695,29 +733,239 @@ if __name__ == "__main__":
     anns_nms_fov_extended = anns_nms_fov + hole_anns
     print(f"final masks (RRMD + holes): {len(anns_nms_fov_extended)}")
 
+    # # -------------------------------------------------------------------------------------------
+    # # Segmentation 시각화
+    # fig, axes = plt.subplots(1, 3, figsize=(20, 5))
+    #
+    # # (0) 원본
+    # axes[0].imshow(img_np)
+    # axes[0].set_title("Original")
+    # axes[0].axis("off")
+    #
+    #
+    # # (1) NMS 전: FOV 안의 모든 마스크
+    # axes[1].imshow(img_np)
+    # for ann in anns_all_fov:  # ✅ 필터링 된 리스트 사용
+    #     show_mask(ann["segmentation"], axes[1], random_color=True, borders=True,  border_thickness=0.5)
+    # axes[1].set_title("All masks INSIDE FOV (no NMS)")
+    # axes[1].axis("off")
+    #
+    # # (2) NMS 후: FOV 안의 최종 후보 마스크 + 비어 있던 큰 홀
+    # axes[2].imshow(img_np)
+    # for ann in anns_nms_fov_extended:
+    #     show_mask(ann["segmentation"], axes[2], random_color=True, borders=True,  border_thickness=1)
+    # axes[2].set_title("Masks INSIDE FOV (after NMS + holes)")
+    # axes[2].axis("off")
+    #
+    # plt.tight_layout()
+    # plt.show()
+
+
     #-------------------------------------------------------------------------------------------
-    # 시각화
-    fig, axes = plt.subplots(1, 3, figsize=(20, 5))
+    # ======================
+    # 1. 비디오 경로 및 프레임 정렬
+    # ======================
+    video_dir = image_dir  # .../images
 
-    # (0) 원본
-    axes[0].imshow(img_np)
-    axes[0].set_title("Original")
-    axes[0].axis("off")
+    all_frame_names = sorted(
+        [
+            f for f in os.listdir(video_dir)
+            if f.lower().endswith((".jpg", ".jpeg")) and os.path.splitext(f)[0].isdigit()
+        ],
+        key=lambda x: int(os.path.splitext(x)[0])
+    )
+    if len(all_frame_names) == 0:
+        raise RuntimeError(f"No numeric jpg/jpeg frames in {video_dir}")
+
+    # segmentation에 실제 사용한 image_path 기준
+    current_file_name = os.path.basename(image_path)
+    first_frame_idx = all_frame_names.index(current_file_name)
+
+    print(f"--- Path & Frame Info ---")
+    print(f"Video Directory: {video_dir}")
+    print(f"Total images in folder: {len(all_frame_names)}")
+    print(f"Tracking Start Frame: {current_file_name} (Index: {first_frame_idx})")
+
+    # ======================
+    # 2. 비디오 모델 로드 (wrapper + tracker)
+    # ======================
+    video_model = build_sam3_video_model(
+        device="cuda",
+        load_from_HF=True,
+        checkpoint_path=None,
+        apply_temporal_disambiguation=True,
+    )
+
+    wrapper = video_model
+    tracker = video_model.tracker
+    predictor = tracker  # 추적/프롬프트 API는 tracker로 통일
+
+    print("VIDEO MODEL TYPE:", type(wrapper))
+    print("TRACKER TYPE:", type(tracker))
+    print("TRACKER HAS add_new_mask?:", hasattr(tracker, "add_new_mask"))
 
 
-    # (1) NMS 전: FOV 안의 모든 마스크
-    axes[1].imshow(img_np)
-    for ann in anns_all_fov:  # ✅ 필터링 된 리스트 사용
-        show_mask(ann["segmentation"], axes[1], random_color=True, borders=True,  border_thickness=0.5)
-    axes[1].set_title("All masks INSIDE FOV (no NMS)")
-    axes[1].axis("off")
+    def init_tracker_state_flexible(tracker_obj, video_dir_path):
+        sig = inspect.signature(tracker_obj.init_state)
+        p = sig.parameters
+        kwargs = {}
 
-    # (2) NMS 후: FOV 안의 최종 후보 마스크 + 비어 있던 큰 홀
-    axes[2].imshow(img_np)
-    for ann in anns_nms_fov_extended:
-        show_mask(ann["segmentation"], axes[2], random_color=True, borders=True,  border_thickness=1)
-    axes[2].set_title("Masks INSIDE FOV (after NMS + holes)")
-    axes[2].axis("off")
+        # 경로 인자명 자동 매핑
+        if "video_path" in p:
+            kwargs["video_path"] = video_dir_path
+        elif "resource_path" in p:
+            kwargs["resource_path"] = video_dir_path
+        elif "path" in p:
+            kwargs["path"] = video_dir_path
+        else:
+            raise RuntimeError(f"tracker.init_state 인자 불일치: signature={sig}")
 
-    plt.tight_layout()
-    plt.show()
+        # 옵션은 해당 인자가 있을 때만 주입
+        optional_args = {
+            "offload_video_to_cpu": False,
+            "async_loading_frames": False,
+            "video_loader_type": "cv2",
+            "cache_image_features": True,
+            "cache_all_image_features": True,
+            "prefetch_image_features": True,
+            "preload_image_features": True,
+        }
+        for k, v in optional_args.items():
+            if k in p:
+                kwargs[k] = v
+
+        return tracker_obj.init_state(**kwargs)
+
+
+    state = init_tracker_state_flexible(tracker, video_dir)
+
+    print("tracker init_state signature:", inspect.signature(tracker.init_state))
+    print("STATE KEYS:", state.keys())
+    print("num_frames:", state.get("num_frames", None))
+    print("feature_cache type:", type(state.get("feature_cache", None)))
+    print("cached_features type:", type(state.get("cached_features", None)))
+
+    if len(anns_nms_fov_extended) == 0:
+        raise RuntimeError("No masks to inject after FOV filtering.")
+
+    if not (0 <= first_frame_idx < state["num_frames"]):
+        raise RuntimeError(
+            f"first_frame_idx={first_frame_idx} out of range (num_frames={state['num_frames']})"
+        )
+
+    # state 키 호환 처리
+    video_H = int(state["video_height"] if "video_height" in state else state["orig_height"])
+    video_W = int(state["video_width"] if "video_width" in state else state["orig_width"])
+
+    print("VIDEO H/W:", video_H, video_W, "num_frames:", state["num_frames"])
+    print(f"--- Injecting {len(anns_nms_fov_extended)} masks via add_new_mask ---")
+
+    if not hasattr(tracker, "add_new_mask"):
+        raise RuntimeError("현재 tracker에 add_new_mask가 없습니다. sam3 버전 불일치 가능성이 큽니다.")
+
+    print("add_new_mask sig:", inspect.signature(tracker.add_new_mask))
+    print("propagate_in_video sig:", inspect.signature(tracker.propagate_in_video))
+
+
+    # ===== cache priming: add_new_mask 전에 반드시 1회 실행 =====
+    def _prime_cache_with_dummy_point(tracker, state, frame_idx, dummy_obj_id=999999):
+        dev = state["device"]
+        h, w = state["video_height"], state["video_width"]
+
+        # 중앙 점 1개 (pixel coords)
+        pts = torch.tensor([[[w * 0.5, h * 0.5]]], dtype=torch.float32, device=dev)  # (1,1,2)
+        lbs = torch.tensor([[1]], dtype=torch.int64, device=dev)  # (1,1)
+
+        tracker.add_new_points_or_box(
+            inference_state=state,
+            frame_idx=frame_idx,
+            obj_id=dummy_obj_id,
+            points=pts,
+            labels=lbs,
+            box=None,
+            normalize_coords=False,
+        )
+
+        # dummy 흔적 제거 (point-prompt 의도 오염 방지)
+        if "point_inputs_per_obj" in state and isinstance(state["point_inputs_per_obj"], dict):
+            state["point_inputs_per_obj"].pop(dummy_obj_id, None)
+
+        # 매핑 dict도 정리
+        if "obj_id_to_idx" in state and isinstance(state["obj_id_to_idx"], dict):
+            rm_idx = state["obj_id_to_idx"].pop(dummy_obj_id, None)
+            if rm_idx is not None and "obj_idx_to_id" in state and isinstance(state["obj_idx_to_id"], dict):
+                state["obj_idx_to_id"].pop(rm_idx, None)
+
+        if "obj_ids" in state and isinstance(state["obj_ids"], list):
+            state["obj_ids"] = [x for x in state["obj_ids"] if x != dummy_obj_id]
+
+
+    # 실제 priming 호출
+    _prime_cache_with_dummy_point(tracker, state, first_frame_idx)
+
+    # 확인 로그
+    print("cached frame keys:", list(state.get("cached_features", {}).keys())[:10], "target:", first_frame_idx)
+    if first_frame_idx not in state.get("cached_features", {}):
+        raise RuntimeError(f"cache priming failed at frame {first_frame_idx}")
+    # ===== cache priming end =====
+
+    # ======================
+    # 3. 첫 프레임 마스크 주입
+    # ======================
+    for obj_id, ann in enumerate(anns_nms_fov_extended, start=1):
+        mask_np = ann["segmentation"]
+        if mask_np is None:
+            continue
+
+        if mask_np.dtype != np.bool_:
+            mask_np = (mask_np > 0)
+
+        if mask_np.shape[:2] != (video_H, video_W):
+            mask_np = cv2.resize(
+                mask_np.astype(np.uint8),
+                (video_W, video_H),
+                interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+
+        mask_np = np.ascontiguousarray(mask_np.astype(np.float32))
+        # device 키가 없는 버전도 있으므로 CPU 텐서로 전달
+        mask_t = torch.from_numpy(mask_np).float().contiguous()
+
+        tracker.add_new_mask(
+            inference_state=state,
+            frame_idx=first_frame_idx,
+            obj_id=obj_id,
+            mask=mask_t,
+        )
+    print("cached keys before injection:", list(state.get("cached_features", {}).keys())[:10])
+    print("has first frame cache?:", first_frame_idx in state.get("cached_features", {}))
+
+    print("Mask injection done.")
+
+    # ======================
+    # 4. 순방향 트래킹 실행
+    # ======================
+    video_segments = {}
+
+    for out in tracker.propagate_in_video(
+            inference_state=state,
+            start_frame_idx=first_frame_idx,
+            max_frame_num_to_track=None,
+            reverse=False,
+            propagate_preflight=True,
+    ):
+        # 버전별 반환 길이 호환
+        if len(out) == 5:
+            out_frame_idx, out_obj_ids, low_res_masks, video_res_masks, obj_scores = out
+        elif len(out) == 4:
+            out_frame_idx, out_obj_ids, video_res_masks, obj_scores = out
+        else:
+            raise RuntimeError(f"Unexpected propagate output length: {len(out)}")
+
+        video_segments[out_frame_idx] = {}
+        masks = (video_res_masks > 0).cpu().numpy()
+
+        for i, out_obj_id in enumerate(out_obj_ids):
+            video_segments[out_frame_idx][out_obj_id] = masks[i]
+
+    print("--- Starting Forward Tracking with Advanced Settings ---")

@@ -1,3 +1,12 @@
+# 실행 인자 4개: --dataset_path  --image_folder --sam_ckpt_path  --clip_ckpt_path
+# 실제 입력 데이터: dataset_path/image_folder
+
+## 이 코드가 내부에서 하는 일
+# 이미지 로드/리사이즈 / SAM 자동 분할 / 마스크 후처리(NMS/중복제거) / 마스크별 crop tile 생성 각 마스크 영역을 bbox로 잘라서 224x224로 패딩/리사이즈/
+# CLIP 임베딩 추출 마스크 tile마다 512차원 feature 추출/정규화 / seg_map 생성 원본 픽셀마다 “어느 마스크 인덱스인지”를 기록한 맵 생성 / 이미지마다 feature와 seg_map 저장
+
+# 출력(저장 파일) : save_folder = dataset_path/language_features_fine
+# 이미지 xxxx.png마다 2개 파일 저장: xxxx_s.npy seg_maps 저장 / xxxx_f.npy feature 저장  / 한 이미지 → 세그맵(픽셀-인스턴스 매핑) + 인스턴스 feature 테이블 구조
 import os
 import random
 import argparse

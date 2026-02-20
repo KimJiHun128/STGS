@@ -6,7 +6,7 @@
       <sourceFolder url="file://$MODULE_DIR$/submodules/segment-anything-langsplat" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/submodules/simple-knn" isTestSource="false" />
     </content>
-    <orderEntry type="jdk" jdkName="SurgTPGS" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="sam3" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">

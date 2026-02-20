@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="SurgTPGS" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="SurgTPGS" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="sam3" project-jdk-type="Python SDK" />
 </project>
