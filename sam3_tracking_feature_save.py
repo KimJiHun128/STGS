@@ -19,13 +19,24 @@ from scene import clip
 import torchvision
 from torch import nn
 
-def parse_start_frame_from_dataset_path(dataset_path: str) -> int:
+def parse_start_frame_from_dataset_path(dataset_path: str, image_dir: str = None) -> int:
     # video01_00080 -> 80
     base = os.path.basename(os.path.normpath(dataset_path))
     m = re.search(r"(\d{5})$", base)
-    if m is None:
-        raise ValueError(f"Cannot parse 5-digit start frame from dataset folder name: {base}")
-    return int(m.group(1))
+    if m is not None:
+        return int(m.group(1))
+
+    # endovis_2018/seq_x_sub 같이 5자리 suffix가 없는 경우:
+    # images의 첫 프레임 번호를 사용하고, 없으면 0으로 fallback
+    if image_dir is not None and os.path.isdir(image_dir):
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
+        files = [f for f in os.listdir(image_dir) if f.lower().endswith(exts)]
+        if len(files) > 0:
+            files = sorted(files)
+            nums = re.findall(r"\d+", files[0])
+            if len(nums) > 0:
+                return int(nums[0])
+    return 0
 
 # =========================
 # CLIP (원 코드 그대로)
@@ -429,7 +440,7 @@ if __name__ == "__main__":
     # Pass2: 프레임별 저장
     save_folder = os.path.join(dataset_path, args.save_name)
 
-    start_frame = parse_start_frame_from_dataset_path(dataset_path)
+    start_frame = parse_start_frame_from_dataset_path(dataset_path, image_dir=image_dir)
 
     pass2_save_per_frame_outputs(
         image_dir=image_dir,

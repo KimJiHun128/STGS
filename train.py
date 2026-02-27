@@ -134,7 +134,8 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
         # for ablation comment tv
         loss = Ll1 + depth_loss + opt.tv_weight*(depth_tvloss + img_tvloss)
         
-        if hyper.include_feature:
+        semantic_active = hyper.include_feature and (iteration >= args.semantic_start_iter)
+        if semantic_active:
             language_feature = render_pkg['render_lang']
             gt_language_feature, language_feature_mask, edge = viewpoint_cam.get_language_feature(language_feature_dir=dataset.lf_path, 
                                                                                             feature_level=dataset.feature_level)
@@ -178,7 +179,7 @@ def scene_reconstruction(dataset, opt, hyper, pipe, testing_iterations, saving_i
                 'img_tv':img_tvloss,
                 'psnr': psnr_,
             }
-            if hyper.include_feature:
+            if semantic_active:
                 loss_dict['Ll1_lang'] = Ll1_lang
                 loss_dict['lang_tv'] = seg_tvloss
                 loss_dict['rs_loss'] = rs_loss
@@ -286,6 +287,12 @@ if __name__ == "__main__":
     parser.add_argument("--start_checkpoint", type=str, default = None)
     parser.add_argument("--expname", type=str, default = "endonerf/pulling_fdm")
     parser.add_argument("--vlm", type=str, default = "CLIP")
+    parser.add_argument(
+        "--semantic_start_iter",
+        type=int,
+        default=0,
+        help="Start iteration for semantic losses. 0 means joint training from the beginning.",
+    )
     parser.add_argument("--configs", type=str, default = "arguments/endonerf/default.py")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)

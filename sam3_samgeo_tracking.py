@@ -40,6 +40,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["NCCL_P2P_DISABLE"] = "1"
 os.environ["NCCL_IB_DISABLE"] = "1"
 
+import argparse
 import re
 import glob
 import cv2
@@ -960,17 +961,28 @@ def build_id_outputs_from_saved_masks(
     if len(saved_paths) == 0:
         raise RuntimeError(f"No mask files found in: {masks_out_dir}")
 
-    n = min(len(frame_files), len(saved_paths))
+    saved_path_by_frame_idx: Dict[int, str] = {}
+    for p in saved_paths:
+        base = os.path.splitext(os.path.basename(p))[0]
+        try:
+            idx = int(base)
+        except ValueError:
+            idx = extract_first_int(base)
+        saved_path_by_frame_idx[int(idx)] = p
+
+    n = len(frame_files)
     prev_id_map = None
     obj_ids_all = sorted([int(k) for k in first_obj_masks.keys()])
 
     for i in range(n):
         stem = os.path.splitext(frame_files[i])[0]
-        p = saved_paths[i]
+        p = saved_path_by_frame_idx.get(i)
 
         if i == 0:
-            print("[DEBUG] saved mask path:", p)
-            if p.lower().endswith(".npy"):
+            if p is None:
+                print("[DEBUG] no saved raw mask file for frame index 0")
+            elif p.lower().endswith(".npy"):
+                print("[DEBUG] saved mask path:", p)
                 arr = np.load(p)
                 print(
                     "[DEBUG] npy shape:",
@@ -982,6 +994,7 @@ def build_id_outputs_from_saved_masks(
                     float(arr.max()),
                 )
             else:
+                print("[DEBUG] saved mask path:", p)
                 arr = cv2.imread(p, cv2.IMREAD_UNCHANGED)
                 print(
                     "[DEBUG] img shape:",
@@ -1020,7 +1033,7 @@ def build_id_outputs_from_saved_masks(
                         os.makedirs(odir, exist_ok=True)
                         ov = overlay_single_mask(frame, m, oid=int(oid), alpha=raw_overlay_alpha)
                         cv2.imwrite(os.path.join(odir, f"{stem}.png"), ov)
-            else:
+            elif p is not None:
                 save_raw_instances_without_wta(
                     image_dir_=image_dir_,
                     frame_files=frame_files,
@@ -1034,36 +1047,62 @@ def build_id_outputs_from_saved_masks(
                     save_overlay=raw_save_overlay,
                     overlay_alpha=raw_overlay_alpha,
                 )
+            else:
+                print(f"[Warn] raw mask not found for frame index {i}; skip RAW export.")
 
         # ---- 후처리 파이프용 raw id_map (stack이면 WTA) ----
         if i == prompt_frame_idx:
             id_map_raw = build_raw_id_map_from_frame0_prompt(first_obj_masks, h, w)
         else:
-            if p.lower().endswith(".npy"):
+            if p is None:
+                if prev_id_map is not None:
+                    id_map_raw = prev_id_map.copy()
+                    print(f"[Warn] mask not found for frame index {i}; use previous id_map.")
+                else:
+                    id_map_raw = np.zeros((h, w), dtype=np.int32)
+                    print(f"[Warn] mask not found for frame index {i}; use empty id_map.")
+            elif p.lower().endswith(".npy"):
                 arr = np.load(p)
+                if arr.ndim == 2:
+                    if arr.shape != (h, w):
+                        arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
+                    id_map_raw = arr.astype(np.int32)
+                elif arr.ndim == 3:
+                    try:
+                        stack = to_stack_nhw(arr, h, w)
+                        id_map_raw = build_raw_id_map_winner_takes_all_from_stack(
+                            stack, obj_id_start=OBJ_ID_START, h=h, w=w
+                        )
+                    except Exception:
+                        if arr.shape[:2] == (h, w) and arr.shape[-1] in (3, 4):
+                            gray = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_BGR2GRAY)
+                            id_map_raw = gray.astype(np.int32)
+                        else:
+                            raise RuntimeError(f"Unsupported 3D mask shape: {arr.shape} from {p}")
+                else:
+                    raise RuntimeError(f"Unsupported saved mask shape: {arr.shape} from {p}")
             else:
                 arr = cv2.imread(p, cv2.IMREAD_UNCHANGED)
                 if arr is None:
                     raise RuntimeError(f"Cannot read mask file: {p}")
-
-            if arr.ndim == 2:
-                if arr.shape != (h, w):
-                    arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
-                id_map_raw = arr.astype(np.int32)
-            elif arr.ndim == 3:
-                try:
-                    stack = to_stack_nhw(arr, h, w)
-                    id_map_raw = build_raw_id_map_winner_takes_all_from_stack(
-                        stack, obj_id_start=OBJ_ID_START, h=h, w=w
-                    )
-                except Exception:
-                    if arr.shape[:2] == (h, w) and arr.shape[-1] in (3, 4):
-                        gray = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_BGR2GRAY)
-                        id_map_raw = gray.astype(np.int32)
-                    else:
-                        raise RuntimeError(f"Unsupported 3D mask shape: {arr.shape} from {p}")
-            else:
-                raise RuntimeError(f"Unsupported saved mask shape: {arr.shape} from {p}")
+                if arr.ndim == 2:
+                    if arr.shape != (h, w):
+                        arr = cv2.resize(arr, (w, h), interpolation=cv2.INTER_NEAREST)
+                    id_map_raw = arr.astype(np.int32)
+                elif arr.ndim == 3:
+                    try:
+                        stack = to_stack_nhw(arr, h, w)
+                        id_map_raw = build_raw_id_map_winner_takes_all_from_stack(
+                            stack, obj_id_start=OBJ_ID_START, h=h, w=w
+                        )
+                    except Exception:
+                        if arr.shape[:2] == (h, w) and arr.shape[-1] in (3, 4):
+                            gray = cv2.cvtColor(arr[:, :, :3], cv2.COLOR_BGR2GRAY)
+                            id_map_raw = gray.astype(np.int32)
+                        else:
+                            raise RuntimeError(f"Unsupported 3D mask shape: {arr.shape} from {p}")
+                else:
+                    raise RuntimeError(f"Unsupported saved mask shape: {arr.shape} from {p}")
 
         # 공간
         id_map = refine_id_map_tracking_v2(
@@ -1315,4 +1354,42 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        default=None,
+        help="Dataset root path (.../videoXX_YYYYY). If set, image_dir becomes dataset_path/images.",
+    )
+    parser.add_argument(
+        "--image_dir",
+        type=str,
+        default=None,
+        help="Direct images folder path. If set, this overrides --dataset_path.",
+    )
+    parser.add_argument(
+        "--run_both_directions",
+        action="store_true",
+        default=True,
+        help="Run both forward(first prompt) and backward(last prompt) in one command (default: True).",
+    )
+    parser.add_argument(
+        "--single_direction",
+        dest="run_both_directions",
+        action="store_false",
+        help="Run only one direction using current PROMPT_FRAME_MODE.",
+    )
+    args = parser.parse_args()
+
+    if args.image_dir:
+        image_dir = args.image_dir
+    elif args.dataset_path:
+        image_dir = os.path.join(args.dataset_path, "images")
+
+    if args.run_both_directions:
+        for mode in ["first", "last"]:
+            PROMPT_FRAME_MODE = mode
+            print(f"\n[Run] PROMPT_FRAME_MODE={PROMPT_FRAME_MODE}")
+            main()
+    else:
+        main()

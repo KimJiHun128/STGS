@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -10,6 +11,8 @@ import argparse
 
 
 torch.autograd.set_detect_anomaly(True)
+SCRIPT_DIR = Path(__file__).resolve().parent
+CKPT_ROOT = SCRIPT_DIR / "ckpt"
 
 def l2_loss(network_output, gt):
     return ((network_output - gt) ** 2).mean()
@@ -34,15 +37,38 @@ if __name__ == '__main__':
                     )
     parser.add_argument('--dataset_name', type=str, required=True)
     parser.add_argument("--vlm", type=str, default = "CLIP")
+    parser.add_argument(
+        '--input_dir_name',
+        type=str,
+        default='',
+        help='Input feature folder name under dataset_path. If empty, use vlm default.',
+    )
+    parser.add_argument(
+        '--ckpt_dir_name',
+        type=str,
+        default='',
+        help='Checkpoint subdir name under ckpt/. If empty, use dataset_name.',
+    )
     args = parser.parse_args()
     dataset_path = args.dataset_path
     num_epochs = args.num_epochs
-    if args.vlm == "clip_fine":
-        data_dir = f"{dataset_path}/language_features_fine"
+    if args.input_dir_name:
+        data_dir = os.path.join(dataset_path, args.input_dir_name)
     else:
-        data_dir = f"{dataset_path}/language_features"
+        if args.vlm == "clip_fine":
+            data_dir = f"{dataset_path}/language_features_fine"
+        else:
+            data_dir = f"{dataset_path}/language_features"
+
+    if args.ckpt_dir_name:
+        ckpt_dir_name = args.ckpt_dir_name
+    else:
+        input_tag = Path(data_dir).name
+        ckpt_dir_name = f"{input_tag}/{args.dataset_name}"
+    ckpt_dir = str(CKPT_ROOT / ckpt_dir_name)
     print('Loading VLM features from:', data_dir)
-    os.makedirs(f'ckpt/{args.dataset_name}', exist_ok=True)
+    print('Saving checkpoints to:', ckpt_dir)
+    os.makedirs(ckpt_dir, exist_ok=True)
 
     train_dataset = Autoencoder_dataset(data_dir)
     train_loader = DataLoader(
@@ -67,7 +93,7 @@ if __name__ == '__main__':
     model = Autoencoder(encoder_hidden_dims, decoder_hidden_dims).to("cuda:0")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    logdir = f'ckpt/{args.dataset_name}'
+    logdir = ckpt_dir
     tb_writer = SummaryWriter(logdir)
     print(logdir)
 
@@ -108,10 +134,10 @@ if __name__ == '__main__':
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
                 best_epoch = epoch
-                torch.save(model.state_dict(), f'ckpt/{args.dataset_name}/best_ckpt.pth')
+                torch.save(model.state_dict(), os.path.join(ckpt_dir, 'best_ckpt.pth'))
                 
             if epoch % 10 == 0:
-                torch.save(model.state_dict(), f'ckpt/{args.dataset_name}/{epoch}_ckpt.pth')
+                torch.save(model.state_dict(), os.path.join(ckpt_dir, f'{epoch}_ckpt.pth'))
             
     print(f"best_epoch: {best_epoch}")
     print("best_loss: {:.8f}".format(best_eval_loss))

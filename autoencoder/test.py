@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import numpy as np
 import torch
 import argparse
@@ -7,6 +8,9 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from dataset import Autoencoder_dataset
 from model import Autoencoder
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+CKPT_ROOT = SCRIPT_DIR / "ckpt"
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -23,23 +27,56 @@ if __name__ == '__main__':
                     default=[16, 32, 64, 128, 256, 256, 512],
                     )
     parser.add_argument("--vlm", type=str, default = "CLIP")
+    parser.add_argument(
+        '--input_dir_name',
+        type=str,
+        default='',
+        help='Input feature folder name under dataset_path. If empty, use vlm default.',
+    )
+    parser.add_argument(
+        '--output_dir_name',
+        type=str,
+        default='',
+        help='Output dim3 folder name under dataset_path. If empty, use vlm default.',
+    )
+    parser.add_argument(
+        '--ckpt_dir_name',
+        type=str,
+        default='',
+        help='Checkpoint subdir name under ckpt/. If empty, use dataset_name.',
+    )
     args = parser.parse_args()
     
     dataset_name = args.dataset_name
     encoder_hidden_dims = args.encoder_dims
     decoder_hidden_dims = args.decoder_dims
     dataset_path = args.dataset_path
-    ckpt_path = f"ckpt/{dataset_name}/best_ckpt.pth"
-
-    if args.vlm == "clip_fine":
-        data_dir = f"{dataset_path}/language_features_fine"
-        output_dir = f"{dataset_path}/language_features_fine_dim3"
+    if args.input_dir_name:
+        data_dir = os.path.join(dataset_path, args.input_dir_name)
     else:
-        data_dir = f"{dataset_path}/language_features"
-        output_dir = f"{dataset_path}/language_features_dim3"
+        if args.vlm == "clip_fine":
+            data_dir = f"{dataset_path}/language_features_fine"
+        else:
+            data_dir = f"{dataset_path}/language_features"
+
+    if args.ckpt_dir_name:
+        ckpt_dir_name = args.ckpt_dir_name
+    else:
+        input_tag = Path(data_dir).name
+        ckpt_dir_name = f"{input_tag}/{dataset_name}"
+    ckpt_path = str(CKPT_ROOT / ckpt_dir_name / "best_ckpt.pth")
+
+    if args.output_dir_name:
+        output_dir = os.path.join(dataset_path, args.output_dir_name)
+    else:
+        if args.vlm == "clip_fine":
+            output_dir = f"{dataset_path}/language_features_fine_dim3"
+        else:
+            output_dir = f"{dataset_path}/language_features_dim3"
         
     print('Dataset Name:', dataset_name)
     print('Features Path:', data_dir)
+    print('Output Path:', output_dir)
     print('Use Checkpoint:', ckpt_path)
     
     os.makedirs(output_dir, exist_ok=True)

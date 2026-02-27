@@ -9,7 +9,7 @@
 #    python render.py --model_path output/endovis_2018/${name}_0  --skip_train \
 #    --skip_video --configs arguments/endonerf/default.py
 #done
-#
+
 
 
 for name in 01_00080 01_00240 01_15019 12_15750 17_01803

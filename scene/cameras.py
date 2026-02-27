@@ -14,7 +14,28 @@ from torch import nn
 import numpy as np
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProjectionMatrix2
 import os
+import glob
+import re
 from utils.image_utils import smooth_sobel_edge_detection
+
+_LF_BASE_CACHE = {}
+
+
+def _feature_bases_from_dir(language_feature_dir):
+    if language_feature_dir in _LF_BASE_CACHE:
+        return _LF_BASE_CACHE[language_feature_dir]
+
+    s_files = glob.glob(os.path.join(language_feature_dir, "*_s.npy"))
+
+    def _sort_key(path):
+        name = os.path.basename(path)
+        nums = re.findall(r"\d+", name)
+        return int(nums[0]) if nums else 10**18
+
+    s_files = sorted(s_files, key=_sort_key)
+    bases = [p[:-6] for p in s_files]  # remove "_s.npy"
+    _LF_BASE_CACHE[language_feature_dir] = bases
+    return bases
 
     
 class Camera(nn.Module):
@@ -73,6 +94,18 @@ class Camera(nn.Module):
         
     def get_language_feature(self, language_feature_dir, feature_level):
         language_feature_name = os.path.join(language_feature_dir, self.image_name)
+        if not os.path.exists(language_feature_name + "_s.npy"):
+            # Fallback for naming schemes like frame_000080_endo_*.npy
+            # Use camera uid order -> sorted feature file order.
+            bases = _feature_bases_from_dir(language_feature_dir)
+            if self.uid < len(bases):
+                language_feature_name = bases[self.uid]
+            else:
+                raise FileNotFoundError(
+                    f"Language feature not found for image_name={self.image_name}, "
+                    f"uid={self.uid} in {language_feature_dir}"
+                )
+
         seg_map = torch.from_numpy(np.load(language_feature_name + '_s.npy')) # [4, 480, 854]
         
         feature_map = torch.from_numpy(np.load(language_feature_name + '_f.npy')) # [N, 3] (Compress from [N, 512])
@@ -116,4 +149,3 @@ class MiniCam:
         view_inv = torch.inverse(self.world_view_transform)
         self.camera_center = view_inv[3][:3]
         self.time = time
-

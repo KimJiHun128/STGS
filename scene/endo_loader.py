@@ -26,6 +26,21 @@ from utils.general_utils import inpaint_depth, inpaint_rgb
 from utils.image_utils import sobel_boundary
 
 
+def resolve_mask_path_from_image(image_path: str) -> str:
+    """
+    Resolve matching mask path by stem regardless of image extension.
+    Example:
+      images/00000.jpg -> masks/00000.png (or .jpg/.jpeg)
+    """
+    mask_dir = os.path.dirname(image_path).replace("images", "masks")
+    stem = os.path.splitext(os.path.basename(image_path))[0]
+    for ext in (".png", ".jpg", ".jpeg"):
+        cand = os.path.join(mask_dir, stem + ext)
+        if os.path.exists(cand):
+            return cand
+    raise FileNotFoundError(f"Mask file not found for image: {image_path} (searched in {mask_dir})")
+
+
 def generate_se3_matrix(translation, rotation_rad):
 
 
@@ -166,7 +181,11 @@ class EndoNeRF_Dataset(object):
             self.image_times.append(idx / poses.shape[0])
         
         # get paths of images, depths, masks, etc.
-        agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
+        agg_fn = lambda filetype: sorted(
+            glob.glob(os.path.join(self.root_dir, filetype, "*.png")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpg")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpeg"))
+        )
         self.image_paths = agg_fn("images")
         self.depth_paths = agg_fn("depth")
         self.masks_paths = agg_fn("masks")
@@ -413,7 +432,11 @@ class CholecSeg8k_Dataset(object):
         """
         
         # get paths of images, depths, masks, etc.
-        agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
+        agg_fn = lambda filetype: sorted(
+            glob.glob(os.path.join(self.root_dir, filetype, "*.png")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpg")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpeg"))
+        )
         self.image_paths = agg_fn("images")
         self.depth_paths = sorted(glob.glob(os.path.join(self.root_dir, 'disps', "*.npy")))
         
@@ -465,7 +488,8 @@ class CholecSeg8k_Dataset(object):
             color = np.array(Image.open(self.image_paths[idx]))/255.0
 
             image = self.transform(color)
-            mask = np.array(Image.open(self.image_paths[idx].replace('images', 'masks')))/255.0
+            mask_path = resolve_mask_path_from_image(self.image_paths[idx])
+            mask = np.array(Image.open(mask_path))/255.0
             # mask = np.ones_like(depth)
             
             mask = self.transform(mask).bool()
@@ -676,7 +700,11 @@ class Endovis_2018_Dataset(object):
         """
         
         # get paths of images, depths, masks, etc.
-        agg_fn = lambda filetype: sorted(glob.glob(os.path.join(self.root_dir, filetype, "*.png")))
+        agg_fn = lambda filetype: sorted(
+            glob.glob(os.path.join(self.root_dir, filetype, "*.png")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpg")) +
+            glob.glob(os.path.join(self.root_dir, filetype, "*.jpeg"))
+        )
         self.image_paths = agg_fn("images")
         self.depth_paths = sorted(glob.glob(os.path.join(self.root_dir, 'disps', "*.npy")))
         

@@ -20,7 +20,7 @@ from pathlib import Path
 # =========================
 # 여기만 수정하면 됨
 # =========================
-MASKS_PNG_DIR = Path("/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/masks_png")
+MASKS_PNG_DIR = Path("/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video17_01803/masks_png")
 # =========================
 
 

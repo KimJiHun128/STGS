@@ -31,6 +31,7 @@
 import os
 import sys
 import re
+import argparse
 from typing import List, Dict, Any, Tuple
 
 import numpy as np
@@ -689,55 +690,59 @@ def main():
         print("before FOV:", len(anns_nms))
 
         fov_mask_path = infer_fov_mask_path(image_dir, image_name)
-        print("[FOV Mask Path]", fov_mask_path)
+        use_fov = os.path.exists(fov_mask_path)
+        print("[FOV Mask Path]", fov_mask_path, f"(exists={use_fov})")
 
-        # vis_all은 더 이상 저장 안 하지만, 파이프라인상 계산은 필요없어서 생략 가능
-        # 여기선 최종 결과만 필요하니 anns_nms만 FOV 적용
-        anns_nms_fov = apply_visible_fov_mask(
-            anns_nms,
-            fov_mask_path,
-            img_np.shape,
-            min_area_after_fov=min_area_after_fov,
-            min_component_area_after_fov=min_component_area_after_fov,
-            thin_erosion_ksize=thin_erosion_ksize,
-            thin_min_eroded_area=thin_min_eroded_area,
-            thin_min_survival_ratio=thin_min_survival_ratio,
-        )
-        print("after  FOV:", len(anns_nms_fov))
-
-        # FOV bool
-        fov_pil = Image.open(fov_mask_path).convert("L")
-        fov_np = np.array(fov_pil)
-        H, W = img_np.shape[:2]
-        if fov_np.shape[:2] != (H, W):
-            fov_np = cv2.resize(fov_np, (W, H), interpolation=cv2.INTER_NEAREST)
-        fov_bool = fov_np > 127
-
-        # holes
-        big_holes = find_big_holes_in_fov(
-            fov_bool=fov_bool,
-            anns=anns_nms_fov,
-            area_thr=hole_area_thr,
-            radius_thr=hole_radius_thr,
-        )
-        print("num big holes:", len(big_holes))
-
-        hole_anns = []
-        for h in big_holes:
-            box_xyxy = mask_to_box_xyxy(h)
-            if box_xyxy is None:
-                continue
-            hole_anns.append(
-                {
-                    "segmentation": h,
-                    "area": int(h.sum()),
-                    "bbox": box_xyxy_to_xywh(box_xyxy),
-                    "score": 0.0,
-                    "point_coords": [[]],
-                }
+        if use_fov:
+            # vis_all은 더 이상 저장 안 하지만, 파이프라인상 계산은 필요없어서 생략 가능
+            # 여기선 최종 결과만 필요하니 anns_nms만 FOV 적용
+            anns_nms_fov = apply_visible_fov_mask(
+                anns_nms,
+                fov_mask_path,
+                img_np.shape,
+                min_area_after_fov=min_area_after_fov,
+                min_component_area_after_fov=min_component_area_after_fov,
+                thin_erosion_ksize=thin_erosion_ksize,
+                thin_min_eroded_area=thin_min_eroded_area,
+                thin_min_survival_ratio=thin_min_survival_ratio,
             )
+            print("after  FOV:", len(anns_nms_fov))
 
-        anns_final = anns_nms_fov + hole_anns
+            # FOV bool
+            fov_pil = Image.open(fov_mask_path).convert("L")
+            fov_np = np.array(fov_pil)
+            H, W = img_np.shape[:2]
+            if fov_np.shape[:2] != (H, W):
+                fov_np = cv2.resize(fov_np, (W, H), interpolation=cv2.INTER_NEAREST)
+            fov_bool = fov_np > 127
+
+            # holes
+            big_holes = find_big_holes_in_fov(
+                fov_bool=fov_bool,
+                anns=anns_nms_fov,
+                area_thr=hole_area_thr,
+                radius_thr=hole_radius_thr,
+            )
+            print("num big holes:", len(big_holes))
+
+            hole_anns = []
+            for h in big_holes:
+                box_xyxy = mask_to_box_xyxy(h)
+                if box_xyxy is None:
+                    continue
+                hole_anns.append(
+                    {
+                        "segmentation": h,
+                        "area": int(h.sum()),
+                        "bbox": box_xyxy_to_xywh(box_xyxy),
+                        "score": 0.0,
+                        "point_coords": [[]],
+                    }
+                )
+            anns_final = anns_nms_fov + hole_anns
+        else:
+            print("[FOV] masks not found -> skip FOV filtering and hole filling for this dataset.")
+            anns_final = anns_nms
         print(f"final masks (RRMD + holes): {len(anns_final)}")
 
         # 1) 마스크 저장
@@ -760,4 +765,24 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset_path",
+        type=str,
+        default=None,
+        help="Dataset root path (.../videoXX_YYYYY). If set, image_dir is dataset_path/images.",
+    )
+    parser.add_argument(
+        "--image_dir",
+        type=str,
+        default=None,
+        help="Direct images folder path. If set, this overrides --dataset_path.",
+    )
+    args = parser.parse_args()
+
+    if args.image_dir:
+        image_dir = args.image_dir
+    elif args.dataset_path:
+        image_dir = os.path.join(args.dataset_path, "images")
+
     main()
