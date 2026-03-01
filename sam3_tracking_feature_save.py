@@ -369,6 +369,87 @@ def pass2_save_per_frame_outputs(
         np.save(os.path.join(save_folder, f"{file_prefix}{save_base}_f.npy"), feat)
 
 
+@torch.no_grad()
+def pass2_save_per_frame_outputs_no_mean(
+    image_dir: str,
+    idmap_dir: str,
+    save_folder: str,
+    model: OpenCLIPNetwork,
+    resolution: int = -1,
+    save_4ch: bool = True,
+    file_prefix: str = "",
+    start_frame: int = 0,
+    scale: float = 1.35,
+    min_margin: int = 12,
+):
+    os.makedirs(save_folder, exist_ok=True)
+    frame_files = sorted_frame_files(image_dir)
+
+    for fname in tqdm(frame_files, desc="Pass2: save per-frame (no mean)"):
+        stem = os.path.splitext(fname)[0]
+        img_path = os.path.join(image_dir, fname)
+        id_path = os.path.join(idmap_dir, f"{stem}.npy")
+        if not os.path.exists(id_path):
+            continue
+
+        img_bgr = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            continue
+
+        orig_h, orig_w = img_bgr.shape[:2]
+        if resolution == -1:
+            global_down = (orig_h / 1080) if orig_h > 1080 else 1.0
+        else:
+            global_down = (orig_w / resolution)
+        scale_down = float(global_down)
+        new_w, new_h = int(orig_w / scale_down), int(orig_h / scale_down)
+        img_bgr = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        id_map = np.load(id_path).astype(np.int32)
+        if id_map.shape != (orig_h, orig_w):
+            id_map = cv2.resize(id_map, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+        id_map = cv2.resize(id_map, (new_w, new_h), interpolation=cv2.INTER_NEAREST).astype(np.int32)
+
+        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        H, W = id_map.shape
+        ids = np.unique(id_map)
+        ids = ids[ids > 0]
+
+        tiles = []
+        oids = []
+        for oid in ids:
+            tile, _ = make_tile_from_id(img_rgb, id_map, int(oid), scale=scale, min_margin=min_margin)
+            if tile is None:
+                continue
+            tiles.append(tile)
+            oids.append(int(oid))
+
+        if len(tiles) == 0:
+            feat = np.zeros((0, 512), dtype=np.float32)
+            seg = -np.ones((H, W), dtype=np.float32)
+        else:
+            tiles_np = np.stack(tiles, axis=0).astype("float32") / 255.0
+            tiles_t = torch.from_numpy(tiles_np).permute(0, 3, 1, 2).to("cuda")
+            clip_embed = model.encode_image(tiles_t)
+            clip_embed /= clip_embed.norm(dim=-1, keepdim=True)
+            feat = clip_embed.detach().cpu().float().numpy().astype(np.float32)
+
+            oid_to_row = {oid: i for i, oid in enumerate(oids)}
+            seg = -np.ones((H, W), dtype=np.float32)
+            for oid, row in oid_to_row.items():
+                seg[id_map == oid] = row
+
+        if save_4ch:
+            seg_out = np.stack([seg, seg, seg, seg], axis=0).astype(np.float32)
+        else:
+            seg_out = seg[None, ...].astype(np.float32)
+
+        i = extract_first_int(stem)
+        save_base = f"frame_{start_frame + i:06d}_endo"
+        np.save(os.path.join(save_folder, f"{file_prefix}{save_base}_s.npy"), seg_out)
+        np.save(os.path.join(save_folder, f"{file_prefix}{save_base}_f.npy"), feat)
+
+
 
 def save_video_tables(save_folder: str, mean_feat: Dict[int, np.ndarray], file_prefix: str = ""):
     ids = sorted(mean_feat.keys())
@@ -391,7 +472,14 @@ if __name__ == "__main__":
     parser.add_argument("--bbox_scale", type=float, default=1.35)
     parser.add_argument("--bbox_margin", type=int, default=12)
 
-    # 평균 방식
+    # 평균 방식 (하위호환: --area_weighted)
+    parser.add_argument(
+        "--feature_agg",
+        type=str,
+        choices=["none", "mean", "area_weighted"],
+        default=None,
+        help="feature aggregation mode",
+    )
     parser.add_argument("--area_weighted", action="store_true", help="mask area로 가중 평균")
     parser.add_argument("--save_4ch", action="store_true", default=True,
                         help="seg_map을 (4,H,W)로 저장 (preprocess_fine 형태, 기본값=True)")
@@ -425,33 +513,48 @@ if __name__ == "__main__":
     # CLIP 로드 (원 코드 그대로)
     model = OpenCLIPNetwork(OpenCLIPNetworkConfig, args.clip_ckpt_path)
 
-    # Pass1: instance mean feature
-    mean_feat = pass1_build_instance_mean_features(
-        dataset_path=dataset_path,
-        image_dir=image_dir,
-        idmap_dir=idmap_dir,
-        model=model,
-        resolution=args.resolution,
-        scale=args.bbox_scale,
-        min_margin=args.bbox_margin,
-        area_weighted=args.area_weighted,
-    )
+    feature_agg = args.feature_agg if args.feature_agg is not None else ("area_weighted" if args.area_weighted else "mean")
 
     # Pass2: 프레임별 저장
     save_folder = os.path.join(dataset_path, args.save_name)
-
     start_frame = parse_start_frame_from_dataset_path(dataset_path, image_dir=image_dir)
 
-    pass2_save_per_frame_outputs(
-        image_dir=image_dir,
-        idmap_dir=idmap_dir,
-        save_folder=save_folder,
-        mean_feat=mean_feat,
-        resolution=args.resolution,
-        save_4ch=args.save_4ch,
-        file_prefix=args.file_prefix,
-        start_frame=start_frame,  # ✅ 추가
-    )
+    if feature_agg in ("mean", "area_weighted"):
+        mean_feat = pass1_build_instance_mean_features(
+            dataset_path=dataset_path,
+            image_dir=image_dir,
+            idmap_dir=idmap_dir,
+            model=model,
+            resolution=args.resolution,
+            scale=args.bbox_scale,
+            min_margin=args.bbox_margin,
+            area_weighted=(feature_agg == "area_weighted"),
+        )
+        pass2_save_per_frame_outputs(
+            image_dir=image_dir,
+            idmap_dir=idmap_dir,
+            save_folder=save_folder,
+            mean_feat=mean_feat,
+            resolution=args.resolution,
+            save_4ch=args.save_4ch,
+            file_prefix=args.file_prefix,
+            start_frame=start_frame,
+        )
+        mean_count = len(mean_feat)
+    else:
+        pass2_save_per_frame_outputs_no_mean(
+            image_dir=image_dir,
+            idmap_dir=idmap_dir,
+            save_folder=save_folder,
+            model=model,
+            resolution=args.resolution,
+            save_4ch=args.save_4ch,
+            file_prefix=args.file_prefix,
+            start_frame=start_frame,
+            scale=args.bbox_scale,
+            min_margin=args.bbox_margin,
+        )
+        mean_count = 0
 
 
     # # (추천) 비디오 단위 테이블도 함께 저장
@@ -459,4 +562,8 @@ if __name__ == "__main__":
 
     print("[Done]")
     print("  save_folder:", save_folder)
-    print("  mean instances:", len(mean_feat))
+    print("  feature_agg:", feature_agg)
+    if feature_agg == "none":
+        print("  mode: per-frame features (no aggregation)")
+    else:
+        print("  mean instances:", mean_count)

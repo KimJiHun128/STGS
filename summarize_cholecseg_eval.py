@@ -3,7 +3,7 @@
 summarize_cholecseg_eval.py
 
 무엇을 하는 스크립트인가?
-- cholecseg_sub 실험 결과(result.json / result_thr_*.json)를 모아서
+- 실험 결과(result.json / result_thr_*.json)를 모아서
   threshold별로
   1) 데이터셋별 Total Average 비교표
   2) "등장한 클래스만" 포함한 Per-class 비교표
@@ -18,11 +18,14 @@ summarize_cholecseg_eval.py
 입력:
 - --output_root (기본: output)
   아래에 각 실험의 result 파일이 존재해야 함.
-  예) output/<method_dir>/cholecseg_sub/<video_name>/test/ours_3000/result_thr_0p40.json
-      output/<method_dir>/cholecseg_sub/<video_name>/test/ours_3000/result.json
+  예) output/<method_dir>/<dataset_family>/<dataset_name>/test/ours_3000/result_thr_0p40.json
+      output/<method_dir>/<dataset_family>/<dataset_name>/test/ours_3000/result.json
+- --dataset_family (기본: cholecseg_sub)
+  집계할 데이터셋 그룹.
+  지원: cholecseg_sub, endovis_2018
 
 출력:
-- --save_dir (기본: output/cholecseg_eval_compare)
+- --save_dir (기본: output/eval_compare)
   threshold마다 아래 파일 생성:
   - total_average_comparison_thr_<tag>.md/.csv
   - per_class_comparison_appeared_only_thr_<tag>.md/.csv
@@ -49,13 +52,19 @@ METHOD_TO_DIR = {
     "area_weighted": "language_features_fine_area_weighted_dim3",
 }
 
-DATASETS = [
-    "video01_00080_0",
-    "video01_00240_0",
-    "video01_15019_0",
-    "video12_15750_0",
-    "video17_01803_0",
-]
+DATASET_CONFIGS = {
+    "cholecseg_sub": [
+        "video01_00080_0",
+        "video01_00240_0",
+        "video01_15019_0",
+        "video12_15750_0",
+        "video17_01803_0",
+    ],
+    "endovis_2018": [
+        "seq_5_sub_0",
+        "seq_9_sub_0",
+    ],
+}
 
 
 def load_result(path: Path) -> Dict[str, Any]:
@@ -70,23 +79,33 @@ def is_present_value(v: Any) -> bool:
     return not (isinstance(v, int) and v == 0)
 
 
-def short_dataset_label(dataset_name: str) -> str:
+def short_dataset_label(dataset_name: str, dataset_family: str) -> str:
     # video01_00080_0 -> 00080
-    m = re.match(r"video\d+_(\d{5})_\d+$", dataset_name)
-    if m:
-        return m.group(1)
+    if dataset_family == "cholecseg_sub":
+        m = re.match(r"video\d+_(\d{5})_\d+$", dataset_name)
+        if m:
+            return m.group(1)
+    elif dataset_family == "endovis_2018":
+        m = re.match(r"seq_(\d+)_sub_\d+$", dataset_name)
+        if m:
+            return f"seq_{m.group(1)}"
     return dataset_name
 
 
-def method_result_dir(output_root: Path, method_dir: str, dataset_name: str) -> Path:
-    return output_root / method_dir / "cholecseg_sub" / dataset_name / "test" / "ours_3000"
+def method_result_dir(output_root: Path, method_dir: str, dataset_family: str, dataset_name: str) -> Path:
+    return output_root / method_dir / dataset_family / dataset_name / "test" / "ours_3000"
 
 
-def discover_threshold_tags(output_root: Path, method_dir: str = "language_features_fine_none_dim3") -> List[str]:
+def discover_threshold_tags(
+    output_root: Path,
+    dataset_family: str,
+    datasets: List[str],
+    method_dir: str = "language_features_fine_none_dim3",
+) -> List[str]:
     # Use one threshold-sweep method as discovery source.
     tags = set()
-    for ds in DATASETS:
-        d = method_result_dir(output_root, method_dir, ds)
+    for ds in datasets:
+        d = method_result_dir(output_root, method_dir, dataset_family, ds)
         if not d.exists():
             continue
         for p in d.glob("result_thr_*.json"):
@@ -99,8 +118,14 @@ def discover_threshold_tags(output_root: Path, method_dir: str = "language_featu
     return sorted(tags)
 
 
-def pick_result_path(output_root: Path, method_dir: str, dataset_name: str, thr_tag: str) -> Path:
-    d = method_result_dir(output_root, method_dir, dataset_name)
+def pick_result_path(
+    output_root: Path,
+    method_dir: str,
+    dataset_family: str,
+    dataset_name: str,
+    thr_tag: str,
+) -> Path:
+    d = method_result_dir(output_root, method_dir, dataset_family, dataset_name)
     if thr_tag != "default":
         p_thr = d / f"result_thr_{thr_tag}.json"
         if p_thr.exists():
@@ -113,15 +138,20 @@ def pick_result_path(output_root: Path, method_dir: str, dataset_name: str, thr_
     return p_thr
 
 
-def build_tables(output_root: Path, thr_tag: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def build_tables(
+    output_root: Path,
+    dataset_family: str,
+    datasets: List[str],
+    thr_tag: str,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     summary_rows: List[Dict[str, Any]] = []
     class_rows: List[Dict[str, Any]] = []
 
-    for ds in DATASETS:
-        ds_label = short_dataset_label(ds)
+    for ds in datasets:
+        ds_label = short_dataset_label(ds, dataset_family)
         method_data: Dict[str, Dict[str, Any]] = {}
         for method, method_dir in METHOD_TO_DIR.items():
-            p = pick_result_path(output_root, method_dir, ds, thr_tag)
+            p = pick_result_path(output_root, method_dir, dataset_family, ds, thr_tag)
             if not p.exists():
                 raise FileNotFoundError(f"Missing result file: {p}")
             method_data[method] = load_result(p)
@@ -184,9 +214,9 @@ def norm_text(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s.lower())
 
 
-# Requested custom highlights in per-class sheet.
+# Requested custom highlights in per-class sheet for cholecseg.
 # dataset label (short) -> class names to highlight
-HIGHLIGHT_TARGETS = {
+HIGHLIGHT_TARGETS_CHOLECSEG = {
     "00080": {"liver"},
     "00240": {"grasper", "liver"},
     "15019": {"abdominal wall", "grasper"},
@@ -264,6 +294,7 @@ def write_xlsx_tables(
     class_rows: List[Dict[str, Any]],
     summary_headers: List[str],
     class_headers: List[str],
+    highlight_targets: Dict[str, set],
 ) -> None:
     # Build table rows (header + body)
     summary_table = [summary_headers] + [[r.get(h, "") for h in summary_headers] for r in summary_rows]
@@ -301,7 +332,7 @@ def write_xlsx_tables(
         ds = str(r["dataset"])
         cls = str(r["class"])
         cls_norm = norm_text(cls)
-        target_norms = {norm_text(x) for x in HIGHLIGHT_TARGETS.get(ds, set())}
+        target_norms = {norm_text(x) for x in highlight_targets.get(ds, set())}
         if cls_norm in target_norms:
             # highlight the full row across visible columns for better readability
             for c in range(1, 7):
@@ -386,7 +417,7 @@ def write_xlsx_tables(
  xmlns:dcterms="http://purl.org/dc/terms/"
  xmlns:dcmitype="http://purl.org/dc/dcmitype/"
  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <dc:title>cholecseg eval summary</dc:title>
+  <dc:title>eval summary</dc:title>
 </cp:coreProperties>"""
 
     xlsx_path.parent.mkdir(parents=True, exist_ok=True)
@@ -405,14 +436,25 @@ def write_xlsx_tables(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_root", type=str, default="output")
-    parser.add_argument("--save_dir", type=str, default="output/cholecseg_eval_compare")
+    parser.add_argument("--save_dir", type=str, default="output/eval_compare")
+    parser.add_argument(
+        "--dataset_family",
+        type=str,
+        default="cholecseg_sub",
+        choices=["cholecseg_sub", "endovis_2018"],
+    )
     args = parser.parse_args()
 
     output_root = Path(args.output_root)
     save_dir = Path(args.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    threshold_tags = discover_threshold_tags(output_root)
+    datasets = DATASET_CONFIGS[args.dataset_family]
+    threshold_tags = discover_threshold_tags(
+        output_root=output_root,
+        dataset_family=args.dataset_family,
+        datasets=datasets,
+    )
 
     summary_headers = [
         "dataset",
@@ -432,7 +474,12 @@ def main():
 
     generated_files = []
     for thr_tag in threshold_tags:
-        summary_rows, class_rows = build_tables(output_root, thr_tag)
+        summary_rows, class_rows = build_tables(
+            output_root=output_root,
+            dataset_family=args.dataset_family,
+            datasets=datasets,
+            thr_tag=thr_tag,
+        )
         total_md = save_dir / f"total_average_comparison_thr_{thr_tag}.md"
         class_md = save_dir / f"per_class_comparison_appeared_only_thr_{thr_tag}.md"
         total_csv = save_dir / f"total_average_comparison_thr_{thr_tag}.csv"
@@ -443,11 +490,21 @@ def main():
         total_csv.write_text(to_csv(summary_rows, summary_headers), encoding="utf-8")
         class_csv.write_text(to_csv(class_rows, class_headers), encoding="utf-8")
         xlsx_file = save_dir / f"comparison_thr_{thr_tag}.xlsx"
-        write_xlsx_tables(xlsx_file, summary_rows, class_rows, summary_headers, class_headers)
+        highlight_targets = HIGHLIGHT_TARGETS_CHOLECSEG if args.dataset_family == "cholecseg_sub" else {}
+        write_xlsx_tables(
+            xlsx_file,
+            summary_rows,
+            class_rows,
+            summary_headers,
+            class_headers,
+            highlight_targets=highlight_targets,
+        )
         generated_files.extend([total_md, class_md, total_csv, class_csv, xlsx_file])
 
     print("[Done]")
     print(f"  save_dir: {save_dir}")
+    print(f"  dataset_family: {args.dataset_family}")
+    print(f"  datasets: {datasets}")
     print(f"  threshold_tags: {threshold_tags}")
     print(f"  files:")
     for p in generated_files:
