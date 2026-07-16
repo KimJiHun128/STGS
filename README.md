@@ -1,12 +1,12 @@
 # STGS
 
-STGS is an integrated pipeline for temporally consistent semantic understanding of surgical videos with 4D Gaussian Splatting. It extends [SurgTPGS](https://github.com/lastbasket/SurgTPGS) with SAM3-based instance initialization, SamGeo3 video tracking, bidirectional track merging, and track-level CLIP feature aggregation.
+STGS is a surgical-video understanding pipeline that builds temporally consistent instances and semantic features before learning them in a 4D Gaussian representation. Its main contributions are the SAM3-based initialization, bidirectional SamGeo3 tracking, track association and postprocessing, and track-aware semantic feature construction.
 
-The project combines three components that require separate Python environments:
+The project integrates three technical layers that require separate Python environments:
 
-- **SurgTPGS**: CLIP feature processing, autoencoder compression, 4D Gaussian training, rendering, and text-prompted evaluation.
-- **SAM3**: instance mask generation on the first and last video frames.
-- **SamGeo3**: forward/backward video tracking initialized from the SAM3 masks.
+- **STGS segmentation and semantics**: initialization, tracking, bidirectional merging, semantic feature extraction/aggregation, and feature compression implemented for this project.
+- **SAM3 and SamGeo3**: external models/libraries used by the STGS segmentation and tracking implementation.
+- **Gaussian Splatting backend**: the final training, rendering, and evaluation stage is based on the SurgTPGS codebase.
 
 ## Pipeline overview
 
@@ -26,23 +26,23 @@ Video frames
    tracking_merge.py
     │
     ▼
-4. Track-aware CLIP feature extraction         [SurgTPGS]
+4. Track-aware CLIP feature extraction         [STGS]
    sam3_tracking_feature_save.py
     │
     ▼
-5. Semantic feature compression to 3D          [SurgTPGS]
+5. Semantic feature compression to 3D          [STGS]
    autoencoder/train.py + autoencoder/test.py
     │
     ▼
-6. Semantic 4D Gaussian Splatting training     [SurgTPGS]
+6. Semantic 4D Gaussian Splatting training     [GS backend]
    train.py
     │
     ▼
-7. RGB/depth/semantic rendering                [SurgTPGS]
+7. RGB/depth/semantic rendering                [GS backend]
    render.py
     │
     ▼
-8. Text-prompted semantic evaluation           [SurgTPGS]
+8. Text-prompted semantic evaluation           [GS backend]
    eval_fine.py
 ```
 
@@ -52,13 +52,13 @@ The main orchestration script is [`sam3_tracking.sh`](./sam3_tracking.sh). It do
 
 ## Environments
 
-The environments are intentionally separate because the original SurgTPGS stack and the newer SAM3/SamGeo stacks require incompatible Python and PyTorch versions.
+The environments are intentionally separate because the Gaussian backend and the newer SAM3/SamGeo libraries require incompatible Python and PyTorch versions. The `SurgTPGS` environment name is retained for compatibility with the existing local environment and scripts; it does not mean that the STGS tracking or semantic-feature pipeline comes from SurgTPGS.
 
 | Environment | Python in exported YAML | Main responsibility |
 |---|---:|---|
 | `sam3` | 3.12 | SAM3 image segmentation |
 | `samgeo_track` | 3.10 | SamGeo3 video tracking and track merging |
-| `SurgTPGS` | 3.7 | CLIP, autoencoder, 4DGS training, rendering, evaluation |
+| `SurgTPGS` | 3.7 | STGS semantic-feature processing plus the GS backend |
 
 Create the environments from the provided exports:
 
@@ -78,7 +78,7 @@ requirements/samgeo-track.txt
 
 See [`requirements/README.md`](./requirements/README.md) for installation commands and CUDA/PyTorch notes. The environments must remain separate; do not install all three files into one environment.
 
-Install the CUDA extensions used by SurgTPGS inside the `SurgTPGS` environment:
+Install the CUDA extensions used by the Gaussian backend inside the legacy-named `SurgTPGS` environment:
 
 ```bash
 conda activate SurgTPGS
@@ -86,7 +86,7 @@ pip install -e submodules/depth-diff-gaussian-rasterization
 pip install -e submodules/simple-knn
 ```
 
-The exported `SurgTPGS` environment uses PyTorch 1.13.1 with CUDA 11.7. A matching CUDA toolkit is therefore recommended when building the extensions:
+This environment uses PyTorch 1.13.1 with CUDA 11.7. A matching CUDA toolkit is therefore recommended when building the extensions:
 
 ```bash
 export PATH=/usr/local/cuda-11.7/bin:${PATH}
@@ -109,7 +109,7 @@ For an existing clone:
 git submodule update --init --recursive
 ```
 
-Only `submodules/sam3` is registered as a Git submodule. The following SurgTPGS dependencies are vendored source directories in this repository:
+Only `submodules/sam3` is registered as a Git submodule. The following Gaussian-backend dependencies are vendored source directories in this repository:
 
 ```text
 submodules/depth-diff-gaussian-rasterization/
@@ -141,7 +141,7 @@ STGS/
     └── sam3/
 ```
 
-A sequence is expected to contain SurgTPGS camera/depth metadata in addition to these relevant folders:
+A sequence is expected to contain the camera/depth metadata required by the Gaussian backend in addition to these relevant folders:
 
 ```text
 <sequence>/
@@ -328,15 +328,15 @@ conda run -n SurgTPGS python eval_fine.py \
 
 The evaluator decodes rendered semantic features, compares them with CLIP text embeddings for the dataset classes, generates semantic masks, and evaluates them against `test_seg`.
 
-## Legacy SurgTPGS scripts
+## Baseline and standalone scripts
 
-The following scripts are retained from the original SurgTPGS workflow:
+The following standalone scripts are retained for baseline reproduction and stage-by-stage execution:
 
-- `pre_data.sh`: original SAM/CLIP preprocessing through `preprocess_fine.py`.
-- `pre_VL_features.sh`: original autoencoder workflow.
-- `train.sh`, `render.sh`, `eval_fine.sh`: standalone SurgTPGS training/evaluation loops.
+- `pre_data.sh`: baseline frame-wise SAM/CLIP preprocessing through `preprocess_fine.py`.
+- `pre_VL_features.sh`: standalone autoencoder workflow.
+- `train.sh`, `render.sh`, `eval_fine.sh`: standalone Gaussian training/evaluation loops.
 
-For the integrated SAM3 + SamGeo workflow, use `sam3_tracking.sh` and the stage commands documented above. The legacy scripts remain useful for reproducing or comparing against the original SurgTPGS preprocessing path.
+For STGS, use `sam3_tracking.sh` and the stage commands documented above. The baseline scripts are kept only for comparison and independent execution.
 
 ## Ablation workflow
 
@@ -355,20 +355,20 @@ python summarize_ablation_video12.py
 
 | Path | Role |
 |---|---|
-| `sam3_seg_mask.py` | SAM3 first/last-frame instance segmentation |
-| `sam3_samgeo_tracking.py` | forward/backward SamGeo3 tracking |
-| `tracking_merge.py` | bidirectional track association and postprocessing |
-| `sam3_tracking_feature_save.py` | tracked-instance CLIP feature extraction |
-| `autoencoder/` | semantic feature compression and reconstruction |
-| `train.py` | SurgTPGS semantic 4D Gaussian training |
+| `sam3_seg_mask.py` | STGS initial-instance generation using SAM3 |
+| `sam3_samgeo_tracking.py` | STGS forward/backward tracking using SamGeo3 |
+| `tracking_merge.py` | STGS bidirectional track association and postprocessing |
+| `sam3_tracking_feature_save.py` | STGS tracked-instance semantic feature construction |
+| `autoencoder/` | STGS semantic feature compression and reconstruction |
+| `train.py` | semantic 4D Gaussian training using the GS backend |
 | `render.py` | RGB/depth/semantic rendering |
 | `eval_fine.py` | text-prompted semantic segmentation evaluation |
-| `scene/`, `gaussian_renderer/`, `utils/` | SurgTPGS/4DGS model and rendering implementation |
+| `scene/`, `gaussian_renderer/`, `utils/` | SurgTPGS-derived 4DGS backend and rendering implementation |
 | `conda_envs/` | reproducible exports for the three environments |
 
-## Upstream SurgTPGS
+## Gaussian backend attribution
 
-This project builds on the SurgTPGS codebase and paper:
+Only the final Gaussian Splatting backbone, rendering, and associated evaluation code are derived from SurgTPGS. The STGS segmentation, tracking, track merging, and track-aware semantic feature pipeline described above are project-specific implementations.
 
 > Yiming Huang, Long Bai, Beilei Cui, Kun Yuan, Guankun Wang, Mobarak I. Hoque, Nicolas Padoy, Nassir Navab, and Hongliang Ren. *SurgTPGS: Semantic 3D Surgical Scene Understanding with Text Promptable Gaussian Splatting*. MICCAI 2025.
 
