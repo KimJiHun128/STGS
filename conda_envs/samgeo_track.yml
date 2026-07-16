@@ -336,4 +336,3 @@ dependencies:
       - typer==0.23.0
       - typer-slim==0.23.0
       - typing-extensions==4.15.0
-prefix: /home/jihun/anaconda3/envs/samgeo_track

@@ -45,13 +45,15 @@ import re
 import glob
 import cv2
 import numpy as np
+from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from samgeo.samgeo3 import SamGeo3Video
 
 # =========================
 # 사용자 설정
 # =========================
-image_dir = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/images"
+PROJECT_ROOT = Path(__file__).resolve().parent
+image_dir = str(PROJECT_ROOT / "data" / "cholecseg_sub" / "video01_00080" / "images")
 
 # tracking direction is auto-selected by prompt frame mode:
 # - "first" -> forward
@@ -1379,6 +1381,13 @@ if __name__ == "__main__":
         action="store_false",
         help="Run only one direction using current PROMPT_FRAME_MODE.",
     )
+    parser.add_argument(
+        "--prompt_mode",
+        type=str,
+        choices=["first", "last"],
+        default=None,
+        help="Prompt frame mode for single-direction run: first(forward) or last(backward).",
+    )
     args = parser.parse_args()
 
     if args.image_dir:
@@ -1392,4 +1401,7 @@ if __name__ == "__main__":
             print(f"\n[Run] PROMPT_FRAME_MODE={PROMPT_FRAME_MODE}")
             main()
     else:
+        if args.prompt_mode is not None:
+            PROMPT_FRAME_MODE = args.prompt_mode
+            print(f"\n[Run] PROMPT_FRAME_MODE={PROMPT_FRAME_MODE}")
         main()

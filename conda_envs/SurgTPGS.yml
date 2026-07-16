@@ -140,4 +140,3 @@ dependencies:
       - widgetsnbextension==4.0.14
       - yapf==0.43.0
       - zipp==3.15.0
-prefix: /home/jihun/anaconda3/envs/SurgTPGS

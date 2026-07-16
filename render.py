@@ -35,8 +35,10 @@ def render_set(model_path, lf_path, name, iteration, views, gaussians, pipeline,
     
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
+    depth_npy_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth_npy")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     gtdepth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth")
+    gtdepth_npy_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt_depth_npy")
     masks_path = os.path.join(model_path, name, "ours_{}".format(iteration), "masks")
     seg_path = os.path.join(model_path, name, "ours_{}".format(iteration), "render_seg")
     seg_npy_path = os.path.join(model_path, name, "ours_{}".format(iteration), "render_seg_npy")
@@ -47,8 +49,10 @@ def render_set(model_path, lf_path, name, iteration, views, gaussians, pipeline,
 
     makedirs(render_path, exist_ok=True)
     makedirs(depth_path, exist_ok=True)
+    makedirs(depth_npy_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
     makedirs(gtdepth_path, exist_ok=True)
+    makedirs(gtdepth_npy_path, exist_ok=True)
     makedirs(masks_path, exist_ok=True)
     makedirs(seg_path, exist_ok=True)
     makedirs(seg_npy_path, exist_ok=True)
@@ -123,6 +127,9 @@ def render_set(model_path, lf_path, name, iteration, views, gaussians, pipeline,
     print("writing rendered depth images.")
     if len(render_depths) != 0:
         for image in tqdm(render_depths):
+            depth_np = image.cpu().squeeze().numpy().astype(np.float32)
+            np.save(os.path.join(depth_npy_path, '{0:05d}'.format(count) + ".npy"), depth_np)
+
             image = (image/image.max())*255.0
             image = np.clip(image.cpu().squeeze().numpy().astype(np.uint8), 0, 255)
             cv2.imwrite(os.path.join(depth_path, '{0:05d}'.format(count) + ".png"), image)
@@ -132,7 +139,9 @@ def render_set(model_path, lf_path, name, iteration, views, gaussians, pipeline,
     print("writing gt depth images.")
     if len(gt_depths) != 0:
         for image in tqdm(gt_depths):
-            
+            depth_np = image.cpu().squeeze().numpy().astype(np.float32)
+            np.save(os.path.join(gtdepth_npy_path, '{0:05d}'.format(count) + ".npy"), depth_np)
+
             image = (image/image.max())*255.0
             image = image.cpu().squeeze().numpy().astype(np.uint8)
             cv2.imwrite(os.path.join(gtdepth_path, '{0:05d}'.format(count) + ".png"), image)

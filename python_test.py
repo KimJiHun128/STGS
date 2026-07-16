@@ -1,6 +1,8 @@
 import numpy as np
+from pathlib import Path
 
-masks_npy = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/image_sam3_seg/00000/masks_stack.npy"
+PROJECT_ROOT = Path(__file__).resolve().parent
+masks_npy = PROJECT_ROOT / "data" / "cholecseg_sub" / "video01_00080" / "image_sam3_seg" / "00000" / "masks_stack.npy"
 arr = np.load(masks_npy)  # expected (N,H,W)
 
 print("shape:", arr.shape, "dtype:", arr.dtype)

@@ -1,0 +1,19 @@
+# Python 3.12 environment used by sam3_seg_mask.py
+torch==2.9.1
+torchvision==0.24.1
+
+# The checked-out SAM3 package declares numpy>=1.26,<2.
+numpy==1.26.4
+opencv-python==4.10.0.84
+pillow==11.3.0
+matplotlib==3.10.7
+tqdm==4.67.1
+transformers==5.1.0
+huggingface-hub==1.4.1
+timm==1.0.24
+ftfy==6.1.1
+regex==2025.11.3
+iopath==0.1.10
+pycocotools==2.0.10
+
+-e ./submodules/sam3

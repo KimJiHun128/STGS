@@ -1,0 +1,19 @@
+# Python 3.10 environment used by SamGeo3 tracking and merging
+torch==2.10.0
+torchvision==0.25.0
+numpy==2.2.6
+opencv-python==4.12.0.88
+pillow==12.1.1
+scipy==1.15.2
+scikit-image==0.25.2
+imageio==2.37.2
+decord==0.6.0
+pycocotools==2.0.11
+pyyaml==6.0.3
+tqdm==4.67.1
+timm==1.0.24
+einops==0.8.2
+iopath==0.1.10
+segment-anything==1.0
+segment-geospatial==1.2.2
+sam3==0.1.2

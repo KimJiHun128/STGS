@@ -329,4 +329,3 @@ dependencies:
       - yapf==0.43.0
       - yt-dlp==2025.11.12
       - zstandard==0.25.0
-prefix: /home/jihun/anaconda3/envs/sam3

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/jihun/PycharmProjects/SurgTPGS
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "${PROJECT_ROOT}"
 # bash sam3_tracking.sh
 
 # -----------------------------
@@ -20,7 +21,7 @@ TRAIN_LEVELS=("0")
 # Step8(evaluation) relevancy threshold sweep
 # - single: "0.4"
 # - sweep : "0.3,0.4,0.5,0.6"
-EVAL_THRESHOLDS="0.3,0.4,0.5,0.6"
+EVAL_THRESHOLDS="0.4"
 
 run_pipeline() {
   local dataset_path="$1"
@@ -32,17 +33,17 @@ run_pipeline() {
   # conda_envs에 저장된 3개의 가상환경 준비
   # 먼저 png2jpg_move / png2jpg_move_mask 전처리 필요시 수행
 
-#  # 1) segmentation: first/last frame -> image_sam3_seg
-#  # 입력:   ${dataset_path}/images, (옵션) ${dataset_path}/masks(FOV)
-#  # 출력:   ${dataset_path}/image_sam3_seg
-#  conda run -n sam3 python sam3_seg_mask.py \
-#    --dataset_path "${dataset_path}"
-#
-#  # 2) tracking: forward + backward in one run -> samgeo_track/{forward,backward}
-#  # 입력:   ${dataset_path}/images, ${dataset_path}/image_sam3_seg
-#  # 출력:   ${dataset_path}/samgeo_track/forward,backward
-#  conda run -n samgeo_track python sam3_samgeo_tracking.py \
-#    --dataset_path "${dataset_path}"
+  # 1) segmentation: first/last frame -> image_sam3_seg
+  # 입력:   ${dataset_path}/images, (옵션) ${dataset_path}/masks(FOV)
+  # 출력:   ${dataset_path}/image_sam3_seg
+  conda run -n sam3 python sam3_seg_mask.py \
+    --dataset_path "${dataset_path}"
+
+  # 2) tracking: forward + backward in one run -> samgeo_track/{forward,backward}
+  # 입력:   ${dataset_path}/images, ${dataset_path}/image_sam3_seg
+  # 출력:   ${dataset_path}/samgeo_track/forward,backward
+  conda run -n samgeo_track python sam3_samgeo_tracking.py \
+    --dataset_path "${dataset_path}"
 #
 #  # 3) merge: bi-directional merge -> samgeo_track/merged
 #  # 입력:   ${dataset_path}/samgeo_track/forward,backward
@@ -122,59 +123,59 @@ run_pipeline() {
 #        --configs arguments/endonerf/default.py
 #    done
 #  done
+##
+#  # 8) evaluation (eval_fine.sh 단계 통합) - multi-run
+#  # 입력:
+#  #   - 렌더 결과: output/${CLIP_SAVE_NAME_PREFIX}_{agg}_dim3/${dataset_name}_${level}/test/ours_3000
+#  #   - GT 세그:   ${dataset_path}/test_seg
+#  #   - AE ckpt:   autoencoder/ckpt/${CLIP_SAVE_NAME_PREFIX}_{agg}/${dataset_name}/best_ckpt.pth
+#  # 출력:
+#  #   - result_thr_*.json, seg_separated_thr_*
+#  for feature_agg in "${CLIP_FEATURE_AGG_MODES[@]}"
+#  do
+#    local clip_save_name="${CLIP_SAVE_NAME_PREFIX}_${feature_agg}"
+#    local dim3_save_name="${clip_save_name}_dim3"
+#    for level in "${TRAIN_LEVELS[@]}"
+#    do
+#      local eval_dataset_name="${dim3_save_name}/${dataset_name}_${level}"
+#      local gt_folder="${dataset_path}/test_seg"
+#      local ae_ckpt_path="autoencoder/ckpt/${clip_save_name}/${dataset_name}/best_ckpt.pth"
+#      local clip_ckpt_path="ckpts/model_final_cholecseg.pth"
+#      if [[ "${dataset_name}" == endovis_2018/* ]]; then
+#        clip_ckpt_path="ckpts/model_final_endovis.pth"
+#      fi
 #
-  # 8) evaluation (eval_fine.sh 단계 통합) - multi-run
-  # 입력:
-  #   - 렌더 결과: output/${CLIP_SAVE_NAME_PREFIX}_{agg}_dim3/${dataset_name}_${level}/test/ours_3000
-  #   - GT 세그:   ${dataset_path}/test_seg
-  #   - AE ckpt:   autoencoder/ckpt/${CLIP_SAVE_NAME_PREFIX}_{agg}/${dataset_name}/best_ckpt.pth
-  # 출력:
-  #   - result_thr_*.json, seg_separated_thr_*
-  for feature_agg in "${CLIP_FEATURE_AGG_MODES[@]}"
-  do
-    local clip_save_name="${CLIP_SAVE_NAME_PREFIX}_${feature_agg}"
-    local dim3_save_name="${clip_save_name}_dim3"
-    for level in "${TRAIN_LEVELS[@]}"
-    do
-      local eval_dataset_name="${dim3_save_name}/${dataset_name}_${level}"
-      local gt_folder="${dataset_path}/test_seg"
-      local ae_ckpt_path="autoencoder/ckpt/${clip_save_name}/${dataset_name}/best_ckpt.pth"
-      local clip_ckpt_path="ckpts/model_final_cholecseg.pth"
-      if [[ "${dataset_name}" == endovis_2018/* ]]; then
-        clip_ckpt_path="ckpts/model_final_endovis.pth"
-      fi
-
-      conda run -n SurgTPGS python eval_fine.py \
-        --dataset_name "${eval_dataset_name}" \
-        --output_path "output" \
-        --encoder_dims 256 128 64 32 3 \
-        --decoder_dims 16 32 64 128 256 256 512 \
-        --gt_path "${gt_folder}" \
-        --ckpt_path "${ae_ckpt_path}" \
-        --clip_ckpt_path "${clip_ckpt_path}" \
-        --level "${level}" \
-        --thresholds "${EVAL_THRESHOLDS}" \
-        --vlm fine
-    done
-  done
+#      conda run -n SurgTPGS python eval_fine.py \
+#        --dataset_name "${eval_dataset_name}" \
+#        --output_path "output" \
+#        --encoder_dims 256 128 64 32 3 \
+#        --decoder_dims 16 32 64 128 256 256 512 \
+#        --gt_path "${gt_folder}" \
+#        --ckpt_path "${ae_ckpt_path}" \
+#        --clip_ckpt_path "${clip_ckpt_path}" \
+#        --level "${level}" \
+#        --thresholds "${EVAL_THRESHOLDS}" \
+#        --vlm fine
+#    done
+#  done
 }
 
 # ----------------------------------------
 # cholecseg_sub
 # ----------------------------------------
-#for name in 01_00080 01_00240 01_15019 12_15750 17_01803
-#do
-#  run_pipeline \
-#    "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video${name}" \
-#    "cholecseg_sub/video${name}"
-#done
+for name in    12_15750  # 01_00080 01_00240 01_15019 12_15750 17_01803
+do
+  run_pipeline \
+    "${PROJECT_ROOT}/data/cholecseg_sub/video${name}" \
+    "cholecseg_sub/video${name}"
+done
 
 # ----------------------------------------
 # endovis_2018
 # ----------------------------------------
-for name in seq_5_sub seq_9_sub
-do
-  run_pipeline \
-    "/home/jihun/PycharmProjects/SurgTPGS/data/endovis_2018/${name}" \
-    "endovis_2018/${name}"
-done
+#for name in seq_5_sub seq_9_sub
+#do
+#  run_pipeline \
+#    "${PROJECT_ROOT}/data/endovis_2018/${name}" \
+#    "endovis_2018/${name}"
+#done

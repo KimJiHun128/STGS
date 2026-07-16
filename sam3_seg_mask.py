@@ -39,9 +39,11 @@ import torch
 import cv2
 from PIL import Image
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # ===== SAM3 import =====
-sam3_root = "/home/jihun/PycharmProjects/SurgTPGS/submodules/sam3"
+PROJECT_ROOT = Path(__file__).resolve().parent
+sam3_root = str(PROJECT_ROOT / "submodules" / "sam3")
 if sam3_root not in sys.path:
     sys.path.insert(0, sam3_root)
 
@@ -50,7 +52,7 @@ from sam3 import build_sam3_image_model  # noqa: E402
 from sam3.model.sam3_image_processor import Sam3Processor  # noqa: E402
 
 # ==== 사용자 설정 ====
-image_dir = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/images"
+image_dir = str(PROJECT_ROOT / "data" / "cholecseg_sub" / "video01_00080" / "images")
 
 
 # ======================
@@ -472,6 +474,7 @@ class Sam3GridMaskGenerator:
         rough_ksize: int = 15,
         rough_thr: float = 0.2,
         disjoint_min_area: int = 2000,
+        enable_snid: bool = True,
     ):
         self.model = model
         self.processor = processor
@@ -489,6 +492,7 @@ class Sam3GridMaskGenerator:
         self.rough_thr = rough_thr
 
         self.disjoint_min_area = disjoint_min_area
+        self.enable_snid = enable_snid
 
     @torch.no_grad()
     def generate(self, img_np: np.ndarray) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], np.ndarray]:
@@ -611,16 +615,27 @@ class Sam3GridMaskGenerator:
         anns_all = build_anns(masks_f, scores_f, points_f, areas_f)
         anns_nms = build_anns(masks_nms, scores_nms, points_nms, areas_nms)
 
-        # disjoint
-        anns_nms = make_masks_disjoint(anns_nms, min_area_remain=self.disjoint_min_area)
+        # disjoint (SNID)
+        if self.enable_snid:
+            anns_nms = make_masks_disjoint(anns_nms, min_area_remain=self.disjoint_min_area)
         return anns_all, anns_nms, grid_points
 
 
 # ======================
 # 메인: first + last 저장
 # ======================
-def main():
+def main(enable_snid: bool = None, enable_rrmd: bool = None):
     # generator hyperparams (원 코드 값 기반)
+    # Ablation toggles
+    # - ENABLE_SNID: Stage-wise Non-overlapping Instance Decomposition
+    # - ENABLE_RRMD: Residual-region Mask Decomposition (hole 추가)
+    ENABLE_SNID = False
+    ENABLE_RRMD = False
+    if enable_snid is not None:
+        ENABLE_SNID = bool(enable_snid)
+    if enable_rrmd is not None:
+        ENABLE_RRMD = bool(enable_rrmd)
+
     points_per_side = 25
     points_per_batch = 64
     score_thresh = 0.3
@@ -635,6 +650,10 @@ def main():
     # hole params
     hole_area_thr = 3000
     hole_radius_thr = 10
+    # FOV 마스크가 없는 데이터셋(endovis 등)에서도
+    # 전체 프레임 기준으로 큰 hole을 신규 마스크로 추가할지 여부
+    # (ENABLE_RRMD=False이면 자동으로 비활성화)
+    add_holes_without_fov = True
 
     # ==== device/autocast ====
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -647,6 +666,7 @@ def main():
             torch.backends.cudnn.allow_tf32 = True
 
     # ==== SAM3 model load ====
+    print(f"[Ablation] ENABLE_SNID={ENABLE_SNID}, ENABLE_RRMD={ENABLE_RRMD}")
     sam3_root_local = os.path.join(os.path.dirname(sam3.__file__), "..")
     bpe_path = f"{sam3_root_local}/sam3/assets/bpe_simple_vocab_16e6.txt.gz"
 
@@ -673,6 +693,7 @@ def main():
         score_thresh=score_thresh,
         iou_nms_thresh=iou_nms_thresh,
         min_mask_area=min_mask_area,
+        enable_snid=ENABLE_SNID,
     )
 
     # ==== run each target ====
@@ -716,33 +737,66 @@ def main():
                 fov_np = cv2.resize(fov_np, (W, H), interpolation=cv2.INTER_NEAREST)
             fov_bool = fov_np > 127
 
-            # holes
-            big_holes = find_big_holes_in_fov(
-                fov_bool=fov_bool,
-                anns=anns_nms_fov,
-                area_thr=hole_area_thr,
-                radius_thr=hole_radius_thr,
-            )
-            print("num big holes:", len(big_holes))
-
-            hole_anns = []
-            for h in big_holes:
-                box_xyxy = mask_to_box_xyxy(h)
-                if box_xyxy is None:
-                    continue
-                hole_anns.append(
-                    {
-                        "segmentation": h,
-                        "area": int(h.sum()),
-                        "bbox": box_xyxy_to_xywh(box_xyxy),
-                        "score": 0.0,
-                        "point_coords": [[]],
-                    }
+            if ENABLE_RRMD:
+                # holes (RRMD)
+                big_holes = find_big_holes_in_fov(
+                    fov_bool=fov_bool,
+                    anns=anns_nms_fov,
+                    area_thr=hole_area_thr,
+                    radius_thr=hole_radius_thr,
                 )
-            anns_final = anns_nms_fov + hole_anns
+                print("num big holes:", len(big_holes))
+
+                hole_anns = []
+                for h in big_holes:
+                    box_xyxy = mask_to_box_xyxy(h)
+                    if box_xyxy is None:
+                        continue
+                    hole_anns.append(
+                        {
+                            "segmentation": h,
+                            "area": int(h.sum()),
+                            "bbox": box_xyxy_to_xywh(box_xyxy),
+                            "score": 0.0,
+                            "point_coords": [[]],
+                        }
+                    )
+                anns_final = anns_nms_fov + hole_anns
+            else:
+                print("[RRMD] disabled (with FOV).")
+                anns_final = anns_nms_fov
         else:
-            print("[FOV] masks not found -> skip FOV filtering and hole filling for this dataset.")
+            print("[FOV] masks not found -> skip FOV filtering.")
             anns_final = anns_nms
+
+            if ENABLE_RRMD and add_holes_without_fov:
+                # FOV가 없으면 전체 프레임을 유효 영역으로 보고 residual hole 탐지
+                full_region = np.ones(img_np.shape[:2], dtype=bool)
+                big_holes = find_big_holes_in_fov(
+                    fov_bool=full_region,
+                    anns=anns_nms,
+                    area_thr=hole_area_thr,
+                    radius_thr=hole_radius_thr,
+                )
+                print("[No-FOV] num big holes:", len(big_holes))
+
+                hole_anns = []
+                for h in big_holes:
+                    box_xyxy = mask_to_box_xyxy(h)
+                    if box_xyxy is None:
+                        continue
+                    hole_anns.append(
+                        {
+                            "segmentation": h,
+                            "area": int(h.sum()),
+                            "bbox": box_xyxy_to_xywh(box_xyxy),
+                            "score": 0.0,
+                            "point_coords": [[]],
+                        }
+                    )
+                anns_final = anns_nms + hole_anns
+            else:
+                print("[No-FOV] RRMD hole filling disabled.")
         print(f"final masks (RRMD + holes): {len(anns_final)}")
 
         # 1) 마스크 저장
@@ -778,6 +832,29 @@ if __name__ == "__main__":
         default=None,
         help="Direct images folder path. If set, this overrides --dataset_path.",
     )
+    parser.add_argument(
+        "--enable_snid",
+        action="store_true",
+        help="Enable SNID (make_masks_disjoint).",
+    )
+    parser.add_argument(
+        "--disable_snid",
+        dest="enable_snid",
+        action="store_false",
+        help="Disable SNID (make_masks_disjoint).",
+    )
+    parser.add_argument(
+        "--enable_rrmd",
+        action="store_true",
+        help="Enable RRMD (hole mask augmentation).",
+    )
+    parser.add_argument(
+        "--disable_rrmd",
+        dest="enable_rrmd",
+        action="store_false",
+        help="Disable RRMD (hole mask augmentation).",
+    )
+    parser.set_defaults(enable_snid=None, enable_rrmd=None)
     args = parser.parse_args()
 
     if args.image_dir:
@@ -785,4 +862,4 @@ if __name__ == "__main__":
     elif args.dataset_path:
         image_dir = os.path.join(args.dataset_path, "images")
 
-    main()
+    main(enable_snid=args.enable_snid, enable_rrmd=args.enable_rrmd)

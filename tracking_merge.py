@@ -52,12 +52,14 @@ from typing import Dict, List, Tuple
 
 import cv2
 import numpy as np
+from pathlib import Path
 
 # =========================
 # User config (수정 가능한 하이퍼파라미터)
 # =========================
 # 입력 비디오(images) 위치
-image_dir = "/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video01_00080/images"
+PROJECT_ROOT = Path(__file__).resolve().parent
+image_dir = str(PROJECT_ROOT / "data" / "cholecseg_sub" / "video01_00080" / "images")
 
 # tracking 결과 루트/하위 폴더 이름
 track_root_name = "samgeo_track"

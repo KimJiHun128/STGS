@@ -1,0 +1,24 @@
+# Python 3.7 / CUDA 11.7 environment
+--extra-index-url https://download.pytorch.org/whl/cu117
+
+torch==1.13.1+cu117
+torchvision==0.14.1+cu117
+torchaudio==0.13.1+cu117
+
+numpy==1.21.6
+scipy==1.7.3
+opencv-python==4.8.1.78
+pillow==9.5.0
+matplotlib==3.5.3
+imageio==2.31.2
+imageio-ffmpeg==0.5.1
+open3d==0.17.0
+plyfile==0.9
+tqdm==4.67.1
+ftfy==6.1.1
+regex==2024.4.16
+lpips==0.1.4
+tensorboard==2.11.2
+mmcv==1.6.0
+pyyaml==6.0.1
+segment-anything==1.0

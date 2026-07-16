@@ -10,7 +10,7 @@ PNG 폴더(images_png)를 입력으로 받아:
 
 사용:
 1) 아래 INPUT_DIR만 바꾸고
-2) python /home/jihun/PycharmProjects/SurgTPGS/png2jpg_move.py 실행
+2) 프로젝트 루트에서 python png2jpg_move.py 실행
 """
 
 import re
@@ -20,7 +20,8 @@ from PIL import Image
 # =========================
 # 여기만 수정하면 됨
 # =========================
-INPUT_DIR = Path("/home/jihun/PycharmProjects/SurgTPGS/data/endovis_2018/seq_9_sub/images_png")
+PROJECT_ROOT = Path(__file__).resolve().parent
+INPUT_DIR = PROJECT_ROOT / "data" / "endovis_2018" / "seq_9_sub" / "images_png"
 
 # JPG 품질(0~100)
 JPG_QUALITY = 100

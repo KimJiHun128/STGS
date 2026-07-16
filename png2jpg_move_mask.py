@@ -10,7 +10,7 @@ masks_png/ 폴더를 입력으로 받아:
 
 사용:
 1) 아래 MASKS_PNG_DIR만 수정
-2) python /home/jihun/PycharmProjects/SurgTPGS/rename_masks_only.py 실행
+2) 프로젝트 루트에서 python png2jpg_move_mask.py 실행
 """
 
 import re
@@ -20,7 +20,8 @@ from pathlib import Path
 # =========================
 # 여기만 수정하면 됨
 # =========================
-MASKS_PNG_DIR = Path("/home/jihun/PycharmProjects/SurgTPGS/data/cholecseg_sub/video17_01803/masks_png")
+PROJECT_ROOT = Path(__file__).resolve().parent
+MASKS_PNG_DIR = PROJECT_ROOT / "data" / "cholecseg_sub" / "video17_01803" / "masks_png"
 # =========================
 
 
